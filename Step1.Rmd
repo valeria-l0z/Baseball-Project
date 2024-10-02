@@ -1,0 +1,218 @@
+---
+title: "126 Data project, step 1"
+date: "Sam Ream, Valeria Lopez, Skyler Yee"
+output:
+  html_document: default
+  pdf_document: 
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+# knit options
+knitr::opts_chunk$set(echo = F,
+                      results = 'markup',
+                      fig.width = 4,
+                      fig.height = 3,
+                      fig.align = 'center',
+                      message = F,
+                      warning = F)
+
+# packages
+library(tidyverse)
+library(faraway)
+library(RSQLite)
+library(skimr)
+```
+
+```{r, echo=FALSE}
+ball <- dbConnect(drv=RSQLite::SQLite(), dbname="./data/database.sqlite")
+```
+
+```{r, echo =FALSE}
+batting <- dbGetQuery(ball, "
+                            SELECT
+                            sum(ab) AS AT_BAT,
+                            player_id,
+                            sum(r) AS RUNS,
+                            sum(h) AS HITS,
+                            sum(hr) AS HOME_RUNS, 
+                            sum(triple) AS TRIPLE,
+                            sum(double) AS DOUBLE,
+                            (sum(h) -  sum(hr) - sum(triple) - sum(double)) AS SINGLES,
+                            sum(bb) AS WALKS,
+                            sum(ibb) AS INT_WALKS,
+                            sum(sb) AS STOLEN_BASES,
+                            sum(hbp) AS HIT_BY_PITCH
+                            
+                            FROM
+                            batting
+                            where
+                            year > 2000
+                            group by
+                            player_id
+                            
+                   ")
+sumbat <- batting
+batting <- subset(batting,batting[,1]>100)
+
+
+for (x in 3:12) 
+{
+  batting[,x] <- batting[,x] / 1
+}
+
+set.seed(5)
+batting <- sample_n(batting, 500, replace = FALSE)
+
+```
+
+```{r, echo=FALSE}
+players <- dbGetQuery(ball, "
+                      
+                      SELECT 
+                      player_id,
+                      (weight / POWER(height, 2)) *703 AS BMI,
+                      bats as HAND
+                      FROM
+                      player
+                      
+                      ")
+
+
+
+
+players <- subset(players, players[,2]>0)
+
+
+
+for ( x in 1:17918)
+{
+
+  if(players[x,2] <= 18.5) {players[x,2] <- "U"} 
+  else if(players[x,2] <= 24.9) {players[x,2] <- "H"}
+  else if(players[x,2] <= 29.9) {players[x,2] <- "O"}
+  else {players[x,2] <- "B"}
+
+}
+
+```
+
+```{r}
+batting <-  merge(batting, players, by="player_id" )
+```
+
+```{r, include=FALSE}
+#Home Runs
+barplot(table(cut(batting$HOME_RUNS, breaks = seq(0, 410, by = 10 ))))
+
+#triples
+barplot(table(cut(batting$TRIPLE, breaks = seq(0, 410, by = 10 ))))
+
+#doubles
+barplot(table(cut(batting$DOUBLE, breaks = seq(0, 410, by = 10 ))))
+
+#singles
+barplot(table(cut(batting$SINGLES, breaks = seq(0, 410, by = 10 ))))
+
+#Walks 
+barplot(table(cut(batting$WALKS, breaks = seq(0, 410, by = 10 ))))
+
+#INTENTIONAL WALKS
+barplot(table(cut(batting$INT_WALKS, breaks = seq(0, 410, by = 10 ))))
+#Stolen Bases
+barplot(table(cut(batting$STOLEN_BASES, breaks = seq(0, 410, by = 10 ))))
+
+#Hit by Pitch
+barplot(table(cut(batting$HIT_BY_PITCH, breaks = seq(0, 410, by = 10 ))))
+
+#Runs By batting Hand
+boxplot(log(batting$RUNS)~batting$HAND, ylab ="Log Number of Runs", xlab ="Batting Hand")
+
+#Runs By BMI
+boxplot(log(batting$RUNS)~batting$BMI, ylab ="Log Number of Runs", xlab ="Body Mass Index")
+
+#Runs
+barplot(table(cut(batting$RUNS, breaks = seq(0, 1350, by = 45 ))))
+
+```
+
+# Data Description
+
+"The History of Baseball" is a record of all the stats of baseball players who have played in the MLB up until the year 2015. While the data in this source is extensive, we elected to narrow the range of the years down to 2000-2015 to more accurately represent the changing landscape of Baseball strategy.
+
+### Data Source
+
+Source: "The History of Baseball" by Sean Lahman,
+
+URL: <https://www.kaggle.com/datasets/seanlahman/the-history-of-baseball>
+
+### Population Description
+
+Since we sampled from games played between 2000-2015, our population is all of the MLB players from 2000-2015. We did not want to generalize the whole history of the MLB because the rules of the game and the strategies used by teams and players are always changing.
+
+### Variables
+
+**BMI** - categorical (underweight, healthy, overweight, obese); The formula is $\text{weight}/(\text{height})^2 \cdot 703$. Weight is in pounds and height is in inches.
+
+**Batting Hand** - categorical (left, right, both); whether the player hits with his left or right hand
+
+**Hits** - quantitative; The number of times a player hits the ball fair and is safe on the base path
+
+**Doubles** - quantitative; The number of times the player gets a hit and lands safely on second without stopping
+
+**Triples** - quantitative; The number of times the player gets a hit and makes it safely to third without stopping
+
+**Home Runs** - quantitative; The number of times player hits the ball and makes it all the way around the base path to home plate safely without stopping
+
+**Walks** - quantitative; The number of times the player refrains from swinging at 4 bad pitches (balls) during their at bat and is allowed to advance to first base
+
+**Stolen Bases** - quantitative; The number of times the player safely makes it from one base to another when there is not a ball in play
+
+**Hit by Pitch** - quantitative; The number of times the player is hit by a pitch and is allowed to advance to first base
+
+**Intentential Walks** - quantitative; The number of times the opposing team elected to walk the player on purpose, allowing them to advance to first base
+
+# Summary Statistics
+
+```{r}
+skim(batting)
+```
+
+These tables are derived from a randomly selected group of 500 players who played in the MLB (Major Leage Baseball) during the years between 2000 and 2015 (inclusive). From these tables, we can observe that all variables have no missing values, which indicates that the dataset is complete. The mean number of runs that a player will have is 206.61 and standard deviation is 248.71 with a minimum number of runs equal to 3 and a maximum of 1348.
+
+## Individual Distributions
+
+```{r fig.cap="Frequency of Number of Runs"}
+barplot(table(cut(batting$RUNS, breaks = seq(0, 1350, by = 45 ))), xlab = "Number of Runs", ylab ="Frequency", names.arg = "3 - 1348", main= "Frequency of Number of Runs")
+```
+
+```{r}
+```
+
+This Histogram shows the distribution of the frequency of the number of runs obtained by a random sample of 500 players. This distribution takes a form similar to the exponential distribution, implying that a large number of players obtain very few runs while a small number of player obtain many runs. The range of the number of runs is 3-1348 as previously noted in the summary tables.
+
+## Numerical Relationships
+
+```{r fig.cap="Comparison of Doubles and Triples"}
+plot(batting$DOUBLE, batting$TRIPLE, xlab = "Number of Doubles", ylab = "Number of Triples", main = "Comparison of Doubles and Triples")
+```
+
+While we were initially concerned that Doubles and Triples may be correlated as they both represent a players ability to get to a different base. However, we can see that the correlation between the two is not as strong as we worried in this graph.
+
+## Categorical Relationships
+
+```{r fig.cap="Number of Runs and Handedness"}
+boxplot(batting$RUNS~batting$HAND, ylab ="Number of Runs", xlab ="Batting Hand", main = "Number of Runs and Handedness")
+```
+
+This graph displays the batting hand of players in relation to the number of runs. The "L" stands for "left", "R" stands for right, and the "B" stands for both. There was not much difference between the three categories as they have similar minimums, means, and third quartile values, while maximums vary a bit more. While the 3 different categories displayed a similar range for the number of runs, those with a right hand more regulary placed above the fourth quartile of their group.
+
+```{r fig.cap="Number of Runs and BMI"}
+boxplot(batting$RUNS~batting$BMI, ylab ="Number of Runs", xlab ="Body Mass Index", main = "Number of Runs and BMI")
+```
+
+This graph displays the relationship between players' BMI and the number of runs. In the graph "B" stands for obese, "H" stands for healthy, and "O" stands for overweight. A player falls under the underweight category if their BMI falls below 18.5, healthy if between 18.5 and 24.9, overweight if between 24.9-29.9, and obese if 30 or above. In our sample, there were no underweight players. Most of the players that fell under the obese category scored the most runs and had the fewest persons outside of the first and fourth quartile. The smallest range of data was for the players that had a healthy category with a few outliers who had the highest runs in the population.
+
+# Conclusion
+
+The data was approximately what we had expected which is shown in our calculated batting average (the number of a player's hits divided by their total number of at-bats) being around 0.246 which is close to MLB's 0.250 calculated value for the league. We sampled our data randomly to get an accurate representation of the population. We originally had hits as an independent variable, but realized that we would be double counting and would make our estimators partially unidentifiable, so we removed it from our data.
