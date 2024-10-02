@@ -1,0 +1,1 @@
+## The primary goal of this project is to predict the number of runs that players will have given observations from their past performances. The models are trained from a dataset sampled from 2000-2015. By leveraging these metrics, we can provide accurate predictions of future games.
