@@ -1,0 +1,293 @@
+---
+title: "126 Data Project, Step 3"
+date: "Sam Ream, Valeria Lopez, Skyler Yee"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+# knit options
+knitr::opts_chunk$set(echo = F,
+                      results = 'markup',
+                      fig.width = 4,
+                      fig.height = 3,
+                      fig.align = 'center',
+                      message = F,
+                      warning = F)
+
+# packages
+library(tidyverse)
+library(faraway)
+library(RSQLite)
+library(skimr)
+library(GGally)
+library(tidymodels)
+library(leaps)
+```
+
+```{r, echo=FALSE}
+ball <- dbConnect(drv=RSQLite::SQLite(), dbname="../../data/database.sqlite")
+```
+
+```{r, echo =FALSE}
+batting <- dbGetQuery(ball, "
+                            SELECT
+                            sum(ab) AS AT_BAT,
+                            player_id,
+                            sum(r) AS RUNS,
+                            sum(hr) AS HOME_RUNS, 
+                            sum(triple) AS TRIPLE,
+                            sum(double) AS DOUBLE,
+                            (sum(h) -  sum(hr) - sum(triple) - sum(double)) AS SINGLES,
+                            sum(bb) AS WALKS,
+                            sum(ibb) AS INT_WALKS,
+                            sum(sb) AS STOLEN_BASES,
+                            sum(hbp) AS HIT_BY_PITCH
+                            
+                            FROM
+                            batting
+                            where
+                            year > 2000
+                            group by
+                            player_id
+                            
+                   ")
+sumbat <- batting
+batting <- subset(batting,batting[,1]>100)
+
+
+for (x in 3:11) 
+{
+  batting[,x] <- batting[,x] / 1
+}
+
+set.seed(5)
+batting <- sample_n(batting, 500, replace = FALSE)
+
+players <- dbGetQuery(ball, "
+                      
+                      SELECT 
+                      player_id,
+                      (weight / POWER(height, 2)) *703 AS BMI,
+                      bats as HAND
+                      FROM
+                      player
+                      
+                      ")
+
+
+
+
+players <- subset(players, players[,2]>0)
+
+
+
+for ( x in 1:17918)
+{
+  if(players[x,2] <= 18.5) {players[x,2] <- "U"} 
+  else if(players[x,2] <= 24.9) {players[x,2] <- "H"}
+  else if(players[x,2] <= 29.9) {players[x,2] <- "O"}
+  else {players[x,2] <- "B"}
+}
+
+batting <-  merge(batting, players, by="player_id" )
+```
+
+```{r, eval = FALSE, fig.width=10, fig.height=10}
+ggpairs(batting, columns = 3:13)
+```
+
+```{r, eval= FALSE, fig.width=10, fig.height=10}
+ggpairs(batting, columns = c("INT_WALKS","AT_BAT", "WALKS","STOLEN_BASES", "HIT_BY_PITCH"))
+```
+
+```{r, eval= FALSE, fig.width=10, fig.height=10}
+ggpairs(batting, columns = c("INT_WALKS","SINGLES", "TRIPLE","STOLEN_BASES", "HOME_RUNS"))
+```
+
+# Introduction
+
+For our project, we are looking at the "History of Baseball" data set, which is a record of all the stats of baseball players who have played in the MLB up until the year 2015. We are interested in seeing which of our predictors (singles, doubles, triples, home runs, walks, intentional walks, hit by pitches, stolen bases, player BMIs, and batting hand) contribute the most to runs scored by individual players. So far, we have seen that our sample aligns with overall MLB stats (eg. the batting average for our sample is 0.246 compared to the MLB’s 0.250) and all of our model assumptions hold, which allowed us to construct a simple linear model with doubles as our predictor. Now, we will be selecting predictors to construct potential multiple linear models and selecting the best one.
+
+# Analysis of Variables
+
+When investigating the predictors, we noted it did not appear that we needed to use any transformation to make the data more linear. Additionally, it is clear that some predictors were highly correlated. An example of this is Singles and Doubles which have a correlation of 0.95. As a consequence of this, we elected to use only one of these two variables in our hand-made model and did the same with other predictors with similar levels of correlation.
+
+We decided to not include interaction variables because different values of our categorical variables (BMI and handedness) do not drastically affect the response. We also felt it was not necessary for any of our non-categorical variables as there are no interactions that we believe to be interesting.
+
+# Computational Models
+
+For our computational models, we used the predictors: Total Intentional Walks, Singles, Triples, Stolen Bases, and Home Runs obtained in a career. We selected these predictors because of their low correlation in addition to their interesting relation to obtained Runs. To help prevent over-correlation, we also elected to create a reduced model using only predictors related to hitting the ball and compared the two to see if we could use a smaller model.
+
+### Model 1 - Full Model ( $\Omega$ )
+
+$\mathbb{E}[Y]=\text{Intercept } + \text{Intentional Walks }+\text{Singles }+\text{Triples }+\text{Stolen Bases }+\text{Home Runs}+\epsilon$
+
+### Model 2 - Reduced Model ( $\omega$ )
+
+$\mathbb{E}[Y]=\text{Intercept } + \text{Singles }+\text{Triples }+\text{Home Runs}+\epsilon$
+
+### Comparison:
+
+$H_0: \beta \in \omega :\text{The Reduced Model is sufficient}$
+
+$H_\alpha: \beta \in \Omega \text{\\} \omega \in w :\text{The Reduced Model is not sufficient}$
+
+```{r}
+model_1 <- lm(RUNS~INT_WALKS + SINGLES + TRIPLE + STOLEN_BASES + HOME_RUNS, data = batting)
+model_2 <- lm(RUNS~SINGLES + TRIPLE + HOME_RUNS, data = batting)
+anova(model_1, model_2)
+```
+
+### Conclusion
+
+As we rejected $H_0$ in favor for $H_\alpha$, we can determine that the reduced model does not model the data well enough to justify the reduction in predictors. As such, we decided to use model 1, the full model, as our computational model.
+
+# Statistical Model
+
+We used a stepwise search to create the best model for our data. For a size of 4 predictors the variables home runs, singles, walks, and stolen bases create a well fit model.
+
+```{r eval = FALSE}
+stat_model <- regsubsets(RUNS~HOME_RUNS + TRIPLE + DOUBLE + SINGLES + WALKS + INT_WALKS + STOLEN_BASES + HIT_BY_PITCH, data = batting,
+                  method = 'seqrep',
+                  nbest = 1,
+                  nvmax = 4)
+summary(stat_model)
+```
+
+### Residual Plot and Summary table
+
+```{r, fig.cap="Plot visualizing how far the residuals stray from the fitted model"}
+stat_model <- lm(RUNS~HOME_RUNS + SINGLES + WALKS + STOLEN_BASES, data = batting)
+res <- resid(stat_model)
+plot(fitted(stat_model), res, ylab = 'Residuals', xlab = 'Fitted Model')
+abline(0,0)
+```
+
+```{r}
+summary(lm(RUNS~HOME_RUNS + SINGLES + WALKS + STOLEN_BASES, data = batting))
+```
+
+# Final Model Selection
+
+Between the two models we created, the statistical model and computational model, we selected the statistical model. The reason behind this selection is that the statistical model has a larger $R_{adj}^2$ value and we want to explain as much of the variance as possible in our model.
+
+# Analysis of the Final Model:
+
+## Coefficient Interpretations
+
+$\beta_1$: Every additional home run a player hits is associated with an increase of about 0.977261 mean runs, after accounting for singles, walks and stolen bases.
+
+$\beta_2$: Every additional single a player hits is associated with an increase of about 0.400909 mean runs, after accounting for home runs, walks and stolen bases.
+
+$\beta_3$: Every additional walk a player earns is associated with an increase of about 0.268561 mean runs, after accounting for home runs, singles and stolen bases.
+
+$\beta_4$: Every additional stolen base a player earns is associated with an increase of about 0.268561 mean runs, after accounting for home runs, singles and walks.
+
+**Significance Tests**
+
+Looking at the p-values for each of our coefficients in the summary table, we can see that all of our coefficients are significant at the 0.05 level.
+
+## Analysis of Residuals and Influence Points
+
+```{r, fig.width=10, fig.height=3, fig.cap="Plot of Leverage, Externally Studentized Residuals, and Influence"}
+
+studentize <- function(resid)
+  {
+    resid*sqrt((500 - 5 - 1)/(500 - 5 - resid^2))
+  }
+
+par(mfrow = c(1, 3))
+plot(augment(stat_model)$.hat, ylab="Leverage")
+
+
+exStdResid <- augment(stat_model)$.std.resid
+exStdResid <- as.data.frame(exStdResid)
+
+exStdResid[,2] <- exStdResid[,1]
+exStdResid[,1] <- 1:500
+colnames(exStdResid) <- (c("Index", "External Studentized Residuals"))
+exStdResid[,2] <- studentize(exStdResid[,2])
+
+
+plot(exStdResid)
+abline(3,0)
+abline(-3,0)
+
+
+plot(augment(stat_model)$.cooksd, ylab ="Cook's Distance/Influence")
+```
+
+**Interpretation of Unusual Observations**
+
+Looking at the plots of leverage, externally studentized residuals, and Cook's Distance/Influence, we can see that there are a few outliers. However, when removing these observations and retraining the model, there was a negligible effect on the fit of the data. As a result, we elected to leave these values in to retain the information they hold.
+
+## Interpretation of Model
+
+Our model shows that there is a positive relationship between our chosen predictors and the number of runs that a players gets in their career. Of the parameters, Home runs have the largest impact and walks has the least. One can conclude that more difficult goals like home runs, stolen bases, and singles will contribute to a greater number of runs than something that is more easily obtained--such as a walk.
+
+```{r eval=FALSE}
+which.max(augment(stat_model)$.cooksd)
+batting[438,]
+batting999 <- batting[-438,]
+
+
+stat_model2 <- lm(RUNS~HOME_RUNS + SINGLES + WALKS + STOLEN_BASES, data = batting999)
+
+
+plot(5,5)
+abline(stat_model, col="Red")
+abline(stat_model2, col="Red")
+
+
+
+
+
+
+
+
+```
+
+## Confidence Interval
+
+```{r}
+chosen_model <- lm(RUNS~ HOME_RUNS + SINGLES + WALKS + STOLEN_BASES, data = batting)
+```
+
+```{r}
+confint(chosen_model, level = 0.95)
+```
+
+```{r}
+x_bar <- batting %>% select(HOME_RUNS, SINGLES, WALKS, STOLEN_BASES) %>% summarize(across(everything(), mean))
+x_bar
+```
+
+```{r}
+predict(chosen_model, newdata = x_bar, interval = 'confidence', level = 0.95)
+```
+
+With 95% confidence, the mean predicted value is estimated to be between 204.71 and 208.50.
+
+## Prediction Interval
+
+```{r}
+comb_x <- data.frame(batting$HOME_RUNS[3], batting$SINGLES[5], batting$WALKS[10], batting$STOLEN_BASES[7])
+colnames(comb_x) <- c("HOME_RUNS", "SINGLES", "WALKS", "STOLEN_BASES")
+comb_x
+
+batting2 <- batting %>% slice(-as.numeric(unlist(comb_x)))
+```
+
+```{r}
+predict(chosen_model, newdata = comb_x , interval = 'prediction', level = 0.95)
+```
+
+With 95% confidence, the predicted value for a combination of 2 home runs, 5 singles, 10 walks, and 7 stolen bases is between 188.06 and 273.59.
+
+# Summary
+
+We sampled our data randomly from years 2000-2015 to get an accurate representation of the population and represent the changing baseball strategy. We analyzed multiple quantitative variables along with BMI and the batting hand of players in relation to runs. While checking the assumptions for linear regression, we found that our data was not normally distributed but were able to continue with our analysis due to the central limit theorem. Through hypothesis testing, we found that doubles is a significant predictor of how many runs the player scores and the residual plot showed that our model was a good fit. In order to create computational models, we chose variables that had low correlation, which consisted of intentional walks singles, triples, stole bases, and home runs. Our other computation model was a reduced version. To create a statistical model, we used stepwise search with four predictors, resulting in a model with home runs, singles, walks, and stolen bases. For our final model, we chose the statistical model because it had the higher adjusted R-squared value. Then we tested the fit of the model and created confidence and prediction intervals.
